@@ -1,0 +1,135 @@
+---
+title: "Divisive clustering of Histogram Data"
+author: "Marie Chavent"
+date: "27/07/2021"
+output:
+  html_document:
+  toc: yes
+highlight: espresso
+theme: journal
+always_allow_html: true
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, message = TRUE, cache = TRUE, warning = F)
+```
+
+
+
+- The crimes dataset concerns official data on violent crime occurence in the USA, together with some social indicators (see the [Communities and Crime Data Set](https://archive.ics.uci.edu/ml/datasets/communities+and+crime)  on the UCI ML Repository). The data, recorded per county, were aggregated with the **HistDAWass** R package at state level in the form of histogram-valued data, . 
+
+```{r}
+load("crimes_hist.rda")
+```
+
+Here we analyse a set of $n=30$ states with $p=4$ histogram-valued variables where four intervals per histogram are defined by the quartiles of the observed data.
+
+```{r}
+library(HistDAWass)
+get.MatH.main.info(CRIMES)
+get.cell.MatH(CRIMES,1,1) # histogram value of "AL" on "pctLowEdu
+plot(CRIMES, type = "HISTO")
+```
+
+- The Mallows distance (L2 Wasserstein distance) between the 30 states is calculated with the function  **WH_MAT_DIST** of the R package **HistDAWass**. The histogram-valued data are standardized according to the procedure available in this function.
+
+```{r}
+DMAT <- WH_MAT_DIST(x = CRIMES, standardize = TRUE)
+```
+
+
+- The divisive clustering of the 30 states is performed with the **div_diss** function based on the **divclust** function of the **divclust** R package.
+
+
+```{r}
+source("div_diss.R")
+source("choose_question_diss.R")
+source("inertdiss-func.R")
+```
+
+```{r}
+# Matrix of the medians values
+M <- as.matrix(get.MatH.stats(CRIMES, stat = "median")$mat)
+```
+
+The **div_diss** function takes two values in input :
+
+  - The matrix **M**  of the median values used to build the binary questions.
+  - The matrix **DMAT** of dissimilarities used to perform the criterion.
+  
+
+```{r, fig.width=15, fig.height=7}
+# divisive clustering
+library(divclust)
+tree <- div_diss(data=M,as.dist(DMAT)) 
+plot(tree, nqbin = 4)
+```
+
+- The number of clusters is chosen with the Silhouette Index.
+
+```{r}
+kmax <- 10
+si <- rep(NA, kmax-1)
+for (k in 2:kmax)
+{
+  partdiv <- div_diss(data=M,as.dist(DMAT), K=k)$which_cluster
+  sidiv <- cluster::silhouette(partdiv, as.dist(DMAT))
+  si[k-1] <- summary(sidiv)$avg.width
+}
+names(si) <- paste("k=",2:10, sep="")
+```
+
+```{r}
+barplot(si, col=4,
+        xlab="number of clusters", ylab="Silhouette indice")
+```
+
+The maximum value is attained for $k = 2$, then we observe a local maximum
+for $k = 5$. The partition in two clusters provides an explained inertia (ratio
+of between to total sum of squares) of just 32.9%, whereas the partition in
+five clusters explains 58.8% of the total inertia. 
+
+```{r}
+# explained inertia 
+div_diss(data=M,as.dist(DMAT), K=2)$B #for k=2
+div_diss(data=M,as.dist(DMAT), K=5)$B  #for k=5
+```
+
+
+- We therefore retain the partition in $k=5$ clusters.
+
+```{r}
+tree <- div_diss(data=M,as.dist(DMAT), K=5) 
+tree$clusters
+tree$description
+```
+
+```{r}
+partdiv <- tree$which_cluster
+```
+
+- Values of the Silhouette Index for the partitios in k = 5 clusters.
+```{r}
+sidiv <- cluster::silhouette(partdiv, as.dist(DMAT))
+rownames(sidiv) <- rownames(DMAT)
+plot(sidiv, cex.names = 0.7, main="", 
+     sub="", xlab="Silhouette width", border=1,
+     do.clus.stat=FALSE, do.n.k=FALSE,
+     col = c("red", "green", "blue", "purple", "pink"))
+```
+
+
+- Ward hierarchical clustering with Mallows distance (L2 Wasserstein distance).
+
+
+```{r}
+n <- get.MatH.nrows(CRIMES)
+tree <- hclust(as.dist(DMAT^2/(2*n)), method = "ward.D")
+plot(tree, hang=-1, sub="", xlab="", main="Ward dendrogram with Mallows distance") 
+rect.hclust(tree, k=5)
+sum(tree$height[26:29])/ sum(tree$height) # 58.8 % of explained inertia
+```
+
+The 5-clusters partition of Ward explains 58.8 % of inertia i.e. only 2% more than divclust but withtout monothetic description.
